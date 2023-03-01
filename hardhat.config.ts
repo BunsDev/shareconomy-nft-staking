@@ -6,30 +6,32 @@ dotenv.config()
 const config: HardhatUserConfig = {
   defaultNetwork: "hardhat",
   networks: {
-    fantom: {
-      url: `https://rpc.testnet.fantom.network`,
-      chainId: 4002,
-      accounts:
-        process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : []
-    },
     fantomtest: {
       url: `https://rpc.testnet.fantom.network`,
       chainId: 4002,
       accounts: [`${process.env.PRIVATE_KEY}`]
     },
+    fantom: {
+      url: `https://rpcapi.fantom.network`,
+      chainId: 250,
+      accounts: [`${process.env.FANTOM_PRIVATE_KEY !== undefined ? process.env.FANTOM_PRIVATE_KEY : ""}`]
+    }
   },
   etherscan: {
     apiKey: {
       polygon: process.env.ETHERSCAN_KEY !== undefined ? process.env.ETHERSCAN_KEY : "",
-      fantomtest: process.env.FANTOMSCAN_KEY !== undefined ? process.env.FANTOMSCAN_KEY : ""
-    }
-  },
-  gasReporter: {
-    enabled: true,
-    coinmarketcap: process.env.COINMARKET_KEY,
-    currency: 'USD',
-    token: 'FTM',
-    gasPriceApi: `https://api-testnet.ftmscan.com/api?module=proxy&action=eth_gasPrice&apikey=${process.env.ETHERSCAN_KEY}`,
+      fantom: process.env.FANTOMSCAN_KEY !== undefined ? process.env.FANTOMSCAN_KEY : ""
+    }, 
+    customChains: [
+      {
+        network: "fantom",
+        chainId: 250,
+        urls: {
+          apiURL: "https://api.ftmscan.com/api",
+          browserURL: "https://ftmscan.com"
+        }
+      }
+    ]
   },
   solidity: {
     version: "0.8.17",

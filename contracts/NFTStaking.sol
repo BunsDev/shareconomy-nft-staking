@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.9;
 
+import "@openzeppelin/contracts/utils/Strings.sol";
+
 /**
  * @title ERC721 token receiver interface
  * @dev Interface for any contract that wants to support safeTransfers
@@ -153,6 +155,17 @@ interface IERC20 {
     ) external returns (bool);
 }
 
+interface IERC20Mintable {
+    function mint(address to, uint amount) external;
+}
+
+interface IERC721Metadata {
+    /**
+     * @dev Returns the Uniform Resource Identifier (URI) for `tokenId` token.
+     */
+    function tokenURI(uint256 tokenId) external view returns (string memory);
+}
+
 /**
  * @dev Required interface of an ERC721 compliant contract.
  */
@@ -292,8 +305,6 @@ interface IERC721 is IERC165 {
     function isApprovedForAll(address owner, address operator) external view returns (bool);
 }
 
-
-
 contract NFTStaking is ERC721Holder {
 
     struct NFTInfo {
@@ -306,6 +317,7 @@ contract NFTStaking is ERC721Holder {
     struct StakingInfo {
         address collectionAddress;
         address rewardTokenAddress;
+        address creatorAddress;
         uint256 minStakeSeconds;
         uint256 maxStakeSeconds;
         uint256 cooldownSeconds;
@@ -313,6 +325,12 @@ contract NFTStaking is ERC721Holder {
         uint256 rewardsPerTimeUnit;
         uint256 startTimestamp;
         uint256 endTimestamp;
+        string baseURI;
+    }
+
+    struct CreatorPool {
+        uint poolId;
+        address collectionAddress;
     }
 
     struct StakingPool {
@@ -321,11 +339,25 @@ contract NFTStaking is ERC721Holder {
         mapping(address => uint256[]) stakedArrays;
     }
 
+    struct Rewards {
+        uint NFTId;
+        uint rewards;
+        string uri;
+    }
+
     uint public poolsCounter;
+
+    address public immutable admin;
 
     mapping(address => bool) public isPoolExists;
 
+    mapping(address => uint) public createdPools;
+
     StakingPool[] private _pools;
+
+    constructor() {
+        admin = msg.sender;
+    }
     
     function initPool(
         address collectionAddress,
@@ -350,29 +382,42 @@ contract NFTStaking is ERC721Holder {
             "Reward token does not supports ERC20 interface"
         );
 
-        /// @dev Calls 'owner()' funtion to check if sender is an owner
-        require(IERC721Ownable(collectionAddress).owner() == msg.sender, "Sender is not an Owner of collection");
+        // Checks if msg.sender is owner of collection contract
+        // /// @dev Calls 'owner()' funtion to check if sender is an owner
+        // require(IERC721Ownable(collectionAddress).owner() == msg.sender, "Sender is not an Owner of collection");
 
         _pools.push();
 
-        StakingInfo memory info = StakingInfo(
-            collectionAddress = collectionAddress,
-            rewardTokenAddress = rewardTokenAddress,
-            minStakeSeconds = minStakeSeconds,
-            maxStakeSeconds = maxStakeSeconds,
-            cooldownSeconds = cooldownSeconds,
-            timeUnitSeconds = timeUnitSeconds,
-            rewardsPerTimeUnit = rewardsPerTimeUnit,
-            startTimestamp = startTimestamp,
-            endTimestamp = endTimestamp
-        );
+        bytes memory strBytes = bytes(IERC721Metadata(collectionAddress).tokenURI(0));
+        bytes memory baseURI = new bytes(strBytes.length - 1);
+
+        for(uint i; i < baseURI.length; i++) {
+            baseURI[i] = strBytes[i];
+        }
+
+        StakingInfo memory info = StakingInfo({
+            collectionAddress: collectionAddress,
+            rewardTokenAddress: rewardTokenAddress,
+            creatorAddress: msg.sender,
+            minStakeSeconds: minStakeSeconds,
+            maxStakeSeconds: maxStakeSeconds,
+            cooldownSeconds: cooldownSeconds,
+            timeUnitSeconds: timeUnitSeconds,
+            rewardsPerTimeUnit: rewardsPerTimeUnit,
+            startTimestamp: startTimestamp,
+            endTimestamp: endTimestamp,
+            baseURI: string(baseURI)
+        });
 
         _pools[poolsCounter].Conditions = info;
 
+        poolsCounter++;
+
         isPoolExists[collectionAddress] = true;
+
+        createdPools[msg.sender] = createdPools[msg.sender] + 1;
     }
 
-    /// Стейкает все принадлижащие и заапрувленные токены721
     function stake(uint256 poolId, uint256[] calldata nftIds) external {
         address collection = _pools[poolId].Conditions.collectionAddress;
         require(_pools[poolId].Conditions.startTimestamp < block.timestamp, "Pool has not started yet");
@@ -397,7 +442,6 @@ contract NFTStaking is ERC721Holder {
         }
     }
 
-    /// Переводит все награды за все токены721
     function claimRewards(uint256 poolId) external {
         uint[] memory stakedNFTs = _pools[poolId].stakedArrays[msg.sender];
 
@@ -408,25 +452,17 @@ contract NFTStaking is ERC721Holder {
         StakingInfo memory conditions = _pools[poolId].Conditions;
 
         for(uint i; i < stakedNFTs.length; i++) {
-
-            /// @dev If duration is more then 'maxStakeSeconds' then it equas to it
-            uint duration;
-            duration < conditions.maxStakeSeconds ? duration = block.timestamp - _pools[poolId].stakedNFTs[stakedNFTs[i]].lastUpdate : duration = conditions.maxStakeSeconds;
-
-            uint accumulatedTimeUnits = duration / conditions.minStakeSeconds;
-
-            rewards += accumulatedTimeUnits * conditions.rewardsPerTimeUnit;
+            rewards += calculateReward(poolId, stakedNFTs[i]);
 
             _pools[poolId].stakedNFTs[stakedNFTs[i]].lastUpdate = block.timestamp;
             _pools[poolId].stakedNFTs[stakedNFTs[i]].stakedStartTime = block.timestamp;
         }
 
-        /// @dev Transfers reward tokens to staker
-        IERC20(conditions.rewardTokenAddress).transfer(msg.sender, rewards);
+        /// @dev Mints tokens to staker
+        IERC20Mintable(conditions.rewardTokenAddress).mint(msg.sender, rewards);
     }
 
-    /// Возвращает токены721 по id его владельцу
-    function withDraw(uint256 poolId, uint256[] calldata nftIds) external {
+    function unstake(uint256 poolId, uint256[] calldata nftIds) external {
         uint[] storage stakedArray = _pools[poolId].stakedArrays[msg.sender];
 
         for(uint i; i < nftIds.length; i++) {   
@@ -445,7 +481,7 @@ contract NFTStaking is ERC721Holder {
             /// @dev Finds nft id at Sender`s 'stakedArrays' rewrites it and deletes id from array
             for(uint j; j < stakedArray.length; j++) {
                 if(stakedArray[j] == nftIds[i]) {
-                    for(uint y = j; y < stakedArray.length; y++) {
+                    for(uint y = j; y < stakedArray.length - 1; y++) {
                         stakedArray[y] = stakedArray[y+1];
                     }
                     stakedArray.pop();
@@ -455,50 +491,120 @@ contract NFTStaking is ERC721Holder {
         }
     }
 
-    /// Возвращает условия стейкинга пула для коллекции, см. StakingInfo
     function getPoolInfo(uint256 index) external view returns(StakingInfo memory) {
         return _pools[index].Conditions;
     }
 
-    /// Возварщает массив из id токенов721 принадлижащих staker, а так же общее кол-во наград за все токены 
-    function getStakeInfo(uint256 poolId, address staker, uint start, uint end) external view returns(uint256[] memory tokensStaked, uint256 rewards) {
-        require(end > start, "'end' must be above 'start'");
+    function getPoolsByCreator(address creator) external view returns(CreatorPool[] memory) {
+        CreatorPool[] memory createdPoolz = new CreatorPool[](createdPools[creator]);
+        uint j;
+
+        for(uint i; i < _pools.length; i++) {
+            if(_pools[i].Conditions.creatorAddress == creator) {
+                createdPoolz[j].poolId = i;
+                createdPoolz[j].collectionAddress = _pools[i].Conditions.collectionAddress;
+                j++;
+            }
+        }
+
+        return createdPoolz;
+    }
+
+    function getAllPools(uint offset, uint limit) external view returns(StakingInfo[] memory) {
+        require(offset <= poolsCounter, "Offset must be less then _pools length");
+        require(offset + limit <= poolsCounter, "Offset + limil must be less then _pools length");
+        StakingInfo[] memory pools = new StakingInfo[](limit);
+        for(uint i; offset < limit; i++) {
+            pools[offset] = _pools[offset].Conditions;
+            offset++;
+        }
+        return pools;
+    }
+
+    function getStakeInfo(uint256 poolId, address staker, uint start, uint end) external view returns(Rewards[] memory) {
         StakingInfo memory conditions = _pools[poolId].Conditions;
 
-        uint256[] memory _tokensStaked = new uint256[](end - start);
-        for( ; start < end; start++) {
-            _tokensStaked[start] = _pools[poolId].stakedArrays[staker][start];
-        }
-
-        tokensStaked = _tokensStaked;
+        Rewards[] memory rewards = new Rewards[](end - start);
+        uint i;
 
         for( ; start < end; start++) {
-            uint duration = block.timestamp - _pools[poolId].stakedNFTs[tokensStaked[start]].stakedStartTime;
+            rewards[i].NFTId = _pools[poolId].stakedArrays[staker][start];
+            rewards[i].rewards = calculateReward(poolId, rewards[i].NFTId);
 
-            uint accumulatedTimeUnits = duration / conditions.minStakeSeconds;
+            // If both are set, concatenate the baseURI and tokenURI (via abi.encodePacked).
+            rewards[i].uri = string(abi.encodePacked(conditions.baseURI, Strings.toString(rewards[i].NFTId)));
 
-            rewards += accumulatedTimeUnits * conditions.rewardsPerTimeUnit;
+            i++;
         }
+
+        return rewards;
     }
 
     function getNFTStakedLength(uint256 poolId, address staker) external view returns(uint) {
         return _pools[poolId].stakedArrays[staker].length;
     }
 
-    /// Считает награду для одного токена721, владелец токена в NFTinfo.tokenOwner
+    function getStakedArray(uint256 poolId, address staker) external view returns(uint[] memory array) {
+        array = _pools[poolId].stakedArrays[staker];
+    }
+
     function calculateReward(uint256 poolId, uint nftId) public view returns(uint256 reward) {
+        require(_pools[poolId].stakedNFTs[nftId].isStaked, "NFT is not staked in pool");
         StakingInfo memory conditions = _pools[poolId].Conditions;
 
-        uint duration;
-        duration < conditions.maxStakeSeconds ? duration = block.timestamp - _pools[poolId].stakedNFTs[nftId].stakedStartTime : duration = conditions.maxStakeSeconds;
+        uint duration = block.timestamp - _pools[poolId].stakedNFTs[nftId].stakedStartTime;
+
+        if(duration > conditions.maxStakeSeconds) duration = conditions.maxStakeSeconds;
 
         uint accumulatedTimeUnits = duration / conditions.minStakeSeconds;
 
         reward = accumulatedTimeUnits * conditions.rewardsPerTimeUnit;
     }
 
-    /// Возвращает инфу токена721, см NFTinfo
+    function removePool(uint poolId) external {
+        require(msg.sender == _pools[poolId].Conditions.creatorAddress, "Sender is not pool creator");
+
+        delete _pools[poolId];
+    }
+
+    function insertPool(
+        uint poolId,
+        address collectionAddress,
+        address rewardTokenAddress,
+        address creatorAddress,
+        uint256 minStakeSeconds,
+        uint256 maxStakeSeconds,
+        uint256 cooldownSeconds,
+        uint256 timeUnitSeconds,
+        uint256 rewardsPerTimeUnit,
+        uint256 startTimestamp,
+        uint256 endTimestamp,
+        string memory baseURI
+    ) external {
+        require(msg.sender == admin, "Sender is not admin");
+
+        StakingInfo memory info = StakingInfo({
+            collectionAddress: collectionAddress,
+            rewardTokenAddress: rewardTokenAddress,
+            creatorAddress: creatorAddress,
+            minStakeSeconds: minStakeSeconds,
+            maxStakeSeconds: maxStakeSeconds,
+            cooldownSeconds: cooldownSeconds,
+            timeUnitSeconds: timeUnitSeconds,
+            rewardsPerTimeUnit: rewardsPerTimeUnit,
+            startTimestamp: startTimestamp,
+            endTimestamp: endTimestamp,
+            baseURI: baseURI
+        });
+
+        _pools[poolId].Conditions = info;
+    }
+
     function getNFTInfo(uint256 poolId, uint nftId) external view returns(NFTInfo memory) {
         return _pools[poolId].stakedNFTs[nftId];
+    }
+
+    function timestamp() external view returns(uint) {
+        return block.timestamp;
     }
 }
