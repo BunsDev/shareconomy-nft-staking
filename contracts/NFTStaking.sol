@@ -315,6 +315,7 @@ contract NFTStaking is ERC721Holder {
     }
 
     struct StakingInfo {
+        uint256 poolId;
         address collectionAddress;
         address rewardTokenAddress;
         address creatorAddress;
@@ -354,6 +355,8 @@ contract NFTStaking is ERC721Holder {
     mapping(address => uint) public createdPools;
 
     StakingPool[] private _pools;
+
+    event PoolInitialized(uint poolId, address creator);
 
     constructor() {
         admin = msg.sender;
@@ -396,6 +399,7 @@ contract NFTStaking is ERC721Holder {
         }
 
         StakingInfo memory info = StakingInfo({
+            poolId: _pools.length - 1,
             collectionAddress: collectionAddress,
             rewardTokenAddress: rewardTokenAddress,
             creatorAddress: msg.sender,
@@ -409,13 +413,15 @@ contract NFTStaking is ERC721Holder {
             baseURI: string(baseURI)
         });
 
-        _pools[poolsCounter].Conditions = info;
+        _pools[_pools.length - 1].Conditions = info;
 
         poolsCounter++;
 
         isPoolExists[collectionAddress] = true;
 
         createdPools[msg.sender] = createdPools[msg.sender] + 1;
+
+        emit PoolInitialized(info.poolId, msg.sender);
     }
 
     function stake(uint256 poolId, uint256[] calldata nftIds) external {
@@ -511,13 +517,22 @@ contract NFTStaking is ERC721Holder {
     }
 
     function getAllPools(uint offset, uint limit) external view returns(StakingInfo[] memory) {
-        require(offset <= poolsCounter, "Offset must be less then _pools length");
-        require(offset + limit <= poolsCounter, "Offset + limil must be less then _pools length");
+        require(offset <= _pools.length, "Offset must be less then _pools length");
+        require(offset + limit <= _pools.length, "Offset + limil must be less then _pools length");
+        require(limit <= poolsCounter, "Limit must be less or equal to existed pools number");
         StakingInfo[] memory pools = new StakingInfo[](limit);
-        for(uint i; offset < limit; i++) {
-            pools[offset] = _pools[offset].Conditions;
-            offset++;
+
+        limit = limit + offset;
+
+        for(uint i; offset < limit; offset++) {
+            if(_pools[offset].Conditions.collectionAddress != address(0)) {
+                pools[i] = _pools[offset].Conditions;
+                i++;
+            } else {
+                limit++;
+            }
         }
+
         return pools;
     }
 
@@ -564,6 +579,14 @@ contract NFTStaking is ERC721Holder {
     function removePool(uint poolId) external {
         require(msg.sender == _pools[poolId].Conditions.creatorAddress, "Sender is not pool creator");
 
+        address collectionAddress = _pools[poolId].Conditions.collectionAddress;
+
+        delete isPoolExists[collectionAddress];
+
+        createdPools[msg.sender] = createdPools[msg.sender] - 1;
+
+        poolsCounter--;
+
         delete _pools[poolId];
     }
 
@@ -582,8 +605,10 @@ contract NFTStaking is ERC721Holder {
         string memory baseURI
     ) external {
         require(msg.sender == admin, "Sender is not admin");
+        require(_pools[poolId].Conditions.collectionAddress == address(0), "poolId is not empty");
 
         StakingInfo memory info = StakingInfo({
+            poolId: poolId,
             collectionAddress: collectionAddress,
             rewardTokenAddress: rewardTokenAddress,
             creatorAddress: creatorAddress,
@@ -598,6 +623,10 @@ contract NFTStaking is ERC721Holder {
         });
 
         _pools[poolId].Conditions = info;
+
+        isPoolExists[collectionAddress] = true;
+
+        createdPools[msg.sender] = createdPools[msg.sender] + 1;
     }
 
     function getNFTInfo(uint256 poolId, uint nftId) external view returns(NFTInfo memory) {
