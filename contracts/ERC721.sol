@@ -11,8 +11,8 @@ contract MyNFTS is ERC721, ERC721URIStorage, Ownable {
 
     Counters.Counter private _tokenIdCounter;
 
-    constructor(address nftStaking) ERC721("MyNFTS", "MTN") {
-        for (uint i; i < 10; i++) {
+    constructor(address nftStaking) ERC721("Punks", "PNS") {
+        for (uint i; i < 50; i++) {
             uint256 tokenId = _tokenIdCounter.current();
             _tokenIdCounter.increment();
             _safeMint(msg.sender, tokenId);
@@ -22,7 +22,7 @@ contract MyNFTS is ERC721, ERC721URIStorage, Ownable {
     }
 
     function _baseURI() internal pure override returns (string memory) {
-        return "https://www.youtube.com/watch?v=oQGr-jwF10s&list=LL&index=10";
+        return "ipfs://QmcsX1EprrBwjPRT7dyDWvmGX7zvcRsmKKDaMTiFbSsZh2/";
     }
 
     function safeMint(address to) public onlyOwner {

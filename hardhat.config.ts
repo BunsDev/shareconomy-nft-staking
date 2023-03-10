@@ -1,6 +1,7 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 import * as dotenv from "dotenv";
+import "./tasks/NFTStaking.tasks";
 dotenv.config()
 
 const config: HardhatUserConfig = {

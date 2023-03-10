@@ -517,19 +517,16 @@ contract NFTStaking is ERC721Holder {
     }
 
     function getAllPools(uint offset, uint limit) external view returns(StakingInfo[] memory) {
-        require(offset <= _pools.length, "Offset must be less then _pools length");
-        require(offset + limit <= _pools.length, "Offset + limil must be less then _pools length");
-        require(limit <= poolsCounter, "Limit must be less or equal to existed pools number");
+        uint length = _pools.length;
+
+        require(offset <= length, "Offset must be less then _pools length");
+        require(offset + limit <= length, "Offset + limil must be less then _pools length");
         StakingInfo[] memory pools = new StakingInfo[](limit);
 
-        limit = limit + offset;
-
-        for(uint i; offset < limit; offset++) {
+        for(uint i; offset < length; offset++) {
             if(_pools[offset].Conditions.collectionAddress != address(0)) {
                 pools[i] = _pools[offset].Conditions;
                 i++;
-            } else {
-                limit++;
             }
         }
 
@@ -627,6 +624,8 @@ contract NFTStaking is ERC721Holder {
         isPoolExists[collectionAddress] = true;
 
         createdPools[msg.sender] = createdPools[msg.sender] + 1;
+
+        poolsCounter++;
     }
 
     function getNFTInfo(uint256 poolId, uint nftId) external view returns(NFTInfo memory) {
