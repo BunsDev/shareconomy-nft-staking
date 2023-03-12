@@ -477,6 +477,10 @@ contract NFTStaking is ERC721Holder {
 
             IERC721(_pools[poolId].Conditions.collectionAddress).safeTransferFrom(address(this), msg.sender, nftIds[i]);
 
+            uint reward = calculateReward(poolId, nftIds[i]);
+            /// @dev Mints tokens to staker
+            IERC20Mintable(_pools[poolId].Conditions.rewardTokenAddress).mint(msg.sender, reward);
+
             _pools[poolId].stakedNFTs[nftIds[i]] = NFTInfo({
                 tokenOwner: address(0),
                 stakedStartTime: 0,
@@ -519,26 +523,23 @@ contract NFTStaking is ERC721Holder {
     function getAllPools(uint offset, uint limit) external view returns(StakingInfo[] memory) {
         uint length = _pools.length;
         uint returnLength;
-        uint lastLimitIndex = offset + limit;
         uint initOffset = offset;
 
         require(offset < length, "Offset must be less then _pools length");
-        // require(offset + limit <= length, "Offset + limil must be less then _pools length");
-        if(lastLimitIndex > length - 1) {
-            lastLimitIndex = length;
+
+        for(; offset < length; offset++) {
+            if(_pools[offset].Conditions.collectionAddress != address(0)) returnLength++;
         }
 
-        for(; offset < lastLimitIndex; offset++) {
-            if(_pools[offset].Conditions.collectionAddress != address(0)) {
-                returnLength++;
-            }
-        }
+        require(returnLength >= poolsCounter, "No pools after offset");
+
+        if(returnLength > limit) returnLength = limit;
 
         StakingInfo[] memory pools = new StakingInfo[](returnLength);
 
         offset = initOffset;
 
-        for(uint i; offset < lastLimitIndex; offset++) {
+        for(uint i; i < returnLength; offset++) {
             if(_pools[offset].Conditions.collectionAddress != address(0)) {
                 pools[i] = _pools[offset].Conditions;
                 i++;
